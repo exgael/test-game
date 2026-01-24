@@ -1,7 +1,6 @@
 import {
   Engine,
   Actor,
-  initPhysics,
   MeshComponent,
   PhysicsComponent,
   PhysicsShapeType,
@@ -9,7 +8,6 @@ import {
   AttachmentRule,
 } from "edenmark";
 import {
-  FreeCamera,
   Vector3,
   Quaternion,
   HemisphericLight,
@@ -52,6 +50,8 @@ class PhysicsCubeActor extends Actor {
       restitution: 0.5,
       friction: 0.5,
     });
+
+    this.physics.setDynamic();
   }
 
   protected override onBeginPlay(): void {
@@ -130,19 +130,15 @@ class GroundActor extends Actor {
 async function main(): Promise<void> {
   const engine = new Engine({
     canvas: "renderCanvas",
-    autoStart: false,
-    fixedTickRate: 60,
+    tickRate: 60,
   });
+
+  engine.timeScale = 1.5
+  // Initialize physics and create world
+  await engine.init();
 
   const scene = engine.scene;
   const world = engine.world;
-
-  await initPhysics(scene);
-
-  // Camera
-  const camera = new FreeCamera("MainCamera", new Vector3(0, 5, -10), scene);
-  camera.setTarget(new Vector3(0, 2, 0));
-  camera.attachControl(engine.canvas, true);
 
   // Light
   const light = new HemisphericLight("MainLight", new Vector3(0, 1, 0), scene);
@@ -190,7 +186,7 @@ async function main(): Promise<void> {
   // Child: blue cube attached to parent, offset by 2 units
   const childCube = world.spawn(
     CubeActor,
-    Transform.fromLocation(new Vector3(7, 3, 0)),
+    undefined,
     (cube) => {
       cube.color = new Color3(0.2, 0.2, 0.9);
     }
@@ -202,6 +198,13 @@ async function main(): Promise<void> {
     rotationRule: AttachmentRule.KeepRelative,
     scaleRule: AttachmentRule.KeepRelative,
   });
+
+  parentCube.attachToActor(player, {
+    locationRule: AttachmentRule.SnapToTarget,
+    rotationRule: AttachmentRule.KeepRelative,
+    scaleRule: AttachmentRule.KeepRelative,
+  });
+  parentCube.rootComponent!.relativeLocation = new Vector3(2, 1, 0);  
 
   console.log("Attached cubes spawned - red (parent) and blue (child)");
 

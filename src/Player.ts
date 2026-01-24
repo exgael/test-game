@@ -4,6 +4,8 @@ import {
   MeshComponent,
   PhysicsComponent,
   PhysicsShapeType,
+  CameraComponent,
+  CameraArmComponent,
   type InputAdapter,
   type InputState,
 } from "edenmark";
@@ -22,15 +24,20 @@ import {
 export class PlayerPawn extends Pawn {
   mesh = new MeshComponent();
   physics = new PhysicsComponent();
+  cameraArm = new CameraArmComponent({ distance: 8, heightOffset: 2 });
+  camera = new CameraComponent();
 
   private _moveSpeed: number = 5;
   private _jumpForce: number = 5;
+  private _lookSensitivity: number = 0.002;
 
   constructor() {
     super();
     this.addComponent(this.mesh);
     this.setRootComponent(this.mesh);
     this.addComponent(this.physics);
+    this.addComponent(this.cameraArm);
+    this.addComponent(this.camera);
     this.tickEnabled = true;
   }
 
@@ -56,18 +63,33 @@ export class PlayerPawn extends Pawn {
     });
 
     // Lock rotation so player stays upright
-    this.physics.setAngularDamping(1000);
+    this.physics.lockRotation();
+
+    // Setup camera arm attached to player mesh
+    this.cameraArm.attachTo(this.mesh);
+
+    // Attach camera to arm
+    this.camera.attachTo(this.cameraArm);
+    this.camera.createDefaultCamera(scene);
+    this.camera.setAsActiveCamera();
   }
 
   protected override executeMovement(
     move: { x: number; y: number },
-    _look: { x: number; y: number },
+    look: { x: number; y: number },
     _deltaTime: number
   ): void {
-    // Convert 2D input to 3D velocity
+    // Look input rotates the camera arm (arm auto-updates in PostPhysics tick)
+    this.cameraArm.addYaw(look.x * this._lookSensitivity);
+    this.cameraArm.addPitch(look.y * this._lookSensitivity);
+
+    // Movement relative to camera direction
+    const forward = this.cameraArm.forward;
+    const right = this.cameraArm.right;
+
     const velocity = this.physics.getLinearVelocity();
-    velocity.x = move.x * this._moveSpeed;
-    velocity.z = move.y * this._moveSpeed;
+    velocity.x = (forward.x * move.y + right.x * move.x) * this._moveSpeed;
+    velocity.z = (forward.z * move.y + right.z * move.x) * this._moveSpeed;
     this.physics.setLinearVelocity(velocity);
   }
 
