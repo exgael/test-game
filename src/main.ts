@@ -5,7 +5,10 @@ import {
   PhysicsComponent,
   PhysicsShapeType,
   Transform,
-  AttachmentRule,
+  CollisionLayer,
+  CollisionPreset,
+  createCollisionProfile,
+  CollisionResponse,
 } from "edenmark";
 import {
   Vector3,
@@ -19,78 +22,12 @@ import {
 import "@babylonjs/inspector";
 import { PlayerPawn, CyclingPlayerController } from "./Player";
 
-/**
- * A cube actor with physics.
- */
-class PhysicsCubeActor extends Actor {
-  mesh = new MeshComponent();
-  physics = new PhysicsComponent();
-
-  color: Color3 = new Color3(Math.random(), Math.random(), Math.random());
-
-  constructor() {
-    super();
-    this.addComponent(this.mesh);
-    this.setRootComponent(this.mesh);
-    this.addComponent(this.physics);
-  }
-
-  protected override onRegisterWithScene(scene: Scene): void {
-    const box = MeshBuilder.CreateBox(`Box_${this.id}`, { size: 1 }, scene);
-
-    const material = new StandardMaterial(`CubeMat_${this.id}`, scene);
-    material.diffuseColor = this.color;
-    box.material = material;
-
-    this.mesh.setMesh(box);
-
-    this.physics.attachTo(this.mesh, {
-      shapeType: PhysicsShapeType.BOX,
-      mass: 1,
-      restitution: 0.5,
-      friction: 0.5,
-    });
-
-    this.physics.setDynamic();
-  }
-
-  protected override onBeginPlay(): void {
-    this.physics.setAngularVelocity(
-      new Vector3(
-        (Math.random() - 0.5) * 2,
-        (Math.random() - 0.5) * 2,
-        (Math.random() - 0.5) * 2
-      )
-    );
-  }
-}
+// ============================================================================
+// Collision Playground - Testing collision layers, masks, and responses
+// ============================================================================
 
 /**
- * Simple cube actor without physics (for attachment demo).
- */
-class CubeActor extends Actor {
-  mesh = new MeshComponent();
-  color: Color3 = new Color3(0.5, 0.5, 0.5);
-
-  constructor() {
-    super();
-    this.addComponent(this.mesh);
-    this.setRootComponent(this.mesh);
-  }
-
-  protected override onRegisterWithScene(scene: Scene): void {
-    const box = MeshBuilder.CreateBox(`Cube_${this.id}`, { size: 1 }, scene);
-
-    const material = new StandardMaterial(`CubeMat_${this.id}`, scene);
-    material.diffuseColor = this.color;
-    box.material = material;
-
-    this.mesh.setMesh(box);
-  }
-}
-
-/**
- * Ground plane actor.
+ * Ground plane - Static collision, blocks everything
  */
 class GroundActor extends Actor {
   mesh = new MeshComponent();
@@ -104,37 +41,203 @@ class GroundActor extends Actor {
   }
 
   protected override onRegisterWithScene(scene: Scene): void {
-    const ground = MeshBuilder.CreateGround(
-      `Ground_${this.id}`,
-      { width: 20, height: 20 },
-      scene
-    );
-
-    const material = new StandardMaterial(`GroundMat_${this.id}`, scene);
-    material.diffuseColor = new Color3(0.4, 0.4, 0.4);
+    const ground = MeshBuilder.CreateGround("Ground", { width: 30, height: 30 }, scene);
+    const material = new StandardMaterial("GroundMat", scene);
+    material.diffuseColor = new Color3(0.3, 0.3, 0.3);
     ground.material = material;
-
     this.mesh.setMesh(ground);
 
+    // Static ground - blocks all
     this.physics.attachTo(this.mesh, {
       shapeType: PhysicsShapeType.BOX,
       mass: 0,
       restitution: 0.3,
+      collisionProfile: CollisionPreset.Static,
     });
   }
 }
 
 /**
- * Main entry point.
+ * Dynamic cube - normal physics, blocks other dynamics
  */
+class DynamicCube extends Actor {
+  mesh = new MeshComponent();
+  physics = new PhysicsComponent();
+  color: Color3;
+
+  constructor() {
+    super();
+    this.color = new Color3(0.2, 0.6, 0.9); // Blue
+    this.addComponent(this.mesh);
+    this.setRootComponent(this.mesh);
+    this.addComponent(this.physics);
+  }
+
+  protected override onRegisterWithScene(scene: Scene): void {
+    const box = MeshBuilder.CreateBox(`DynamicCube_${this.id}`, { size: 1 }, scene);
+    const material = new StandardMaterial(`DynamicMat_${this.id}`, scene);
+    material.diffuseColor = this.color;
+    box.material = material;
+    this.mesh.setMesh(box);
+
+    this.physics.attachTo(this.mesh, {
+      shapeType: PhysicsShapeType.BOX,
+      mass: 1,
+      restitution: 0.5,
+      friction: 0.5,
+      collisionProfile: CollisionPreset.Dynamic,
+    });
+    this.physics.setDynamic();
+  }
+}
+
+/**
+ * "Ghost" cube - ignores other dynamics, only collides with ground
+ * Good for: non-blocking visual effects, pass-through objects
+ */
+class GhostCube extends Actor {
+  mesh = new MeshComponent();
+  physics = new PhysicsComponent();
+
+  constructor() {
+    super();
+    this.addComponent(this.mesh);
+    this.setRootComponent(this.mesh);
+    this.addComponent(this.physics);
+  }
+
+  protected override onRegisterWithScene(scene: Scene): void {
+    const box = MeshBuilder.CreateBox(`GhostCube_${this.id}`, { size: 1 }, scene);
+    const material = new StandardMaterial(`GhostMat_${this.id}`, scene);
+    material.diffuseColor = new Color3(0.9, 0.2, 0.9); // Magenta
+    material.alpha = 0.6; // Semi-transparent
+    box.material = material;
+    this.mesh.setMesh(box);
+
+    // Custom profile: only collides with Static/Ground, ignores Dynamic
+    const ghostProfile = createCollisionProfile({
+      layer: CollisionLayer.Dynamic,
+      mask: CollisionLayer.Static | CollisionLayer.Ground, // Only hit ground
+      defaultResponse: CollisionResponse.Block,
+    });
+
+    this.physics.attachTo(this.mesh, {
+      shapeType: PhysicsShapeType.BOX,
+      mass: 1,
+      restitution: 0.8,
+      collisionProfile: ghostProfile,
+    });
+    this.physics.setDynamic();
+  }
+}
+
+/**
+ * Projectile - only hits Static and Actors, ignores other projectiles
+ */
+class ProjectileSphere extends Actor {
+  mesh = new MeshComponent();
+  physics = new PhysicsComponent();
+
+  constructor() {
+    super();
+    this.addComponent(this.mesh);
+    this.setRootComponent(this.mesh);
+    this.addComponent(this.physics);
+  }
+
+  protected override onRegisterWithScene(scene: Scene): void {
+    const sphere = MeshBuilder.CreateSphere(`Projectile_${this.id}`, { diameter: 0.5 }, scene);
+    const material = new StandardMaterial(`ProjectileMat_${this.id}`, scene);
+    material.diffuseColor = new Color3(0.9, 0.9, 0.2); // Yellow
+    material.emissiveColor = new Color3(0.3, 0.3, 0);
+    sphere.material = material;
+    this.mesh.setMesh(sphere);
+
+    this.physics.attachTo(this.mesh, {
+      shapeType: PhysicsShapeType.SPHERE,
+      mass: 0.5,
+      restitution: 0.9,
+      collisionProfile: CollisionPreset.Projectile,
+    });
+    this.physics.setDynamic();
+  }
+}
+
+/**
+ * Trigger zone - overlaps, never blocks
+ * Good for: damage zones, pickup areas, checkpoints
+ */
+class TriggerZone extends Actor {
+  mesh = new MeshComponent();
+  physics = new PhysicsComponent();
+
+  constructor() {
+    super();
+    this.addComponent(this.mesh);
+    this.setRootComponent(this.mesh);
+    this.addComponent(this.physics);
+    this.tickEnabled = true;
+  }
+
+  protected override onRegisterWithScene(scene: Scene): void {
+    const box = MeshBuilder.CreateBox(`Trigger_${this.id}`, { size: 3 }, scene);
+    const material = new StandardMaterial(`TriggerMat_${this.id}`, scene);
+    material.diffuseColor = new Color3(0.2, 0.9, 0.2); // Green
+    material.alpha = 0.3;
+    box.material = material;
+    this.mesh.setMesh(box);
+
+    this.physics.attachTo(this.mesh, {
+      shapeType: PhysicsShapeType.BOX,
+      mass: 0, // Static trigger
+      collisionProfile: CollisionPreset.Trigger,
+    });
+    this.physics.setStatic();
+  }
+
+  // Note: In a full implementation, you'd have overlap events from physics
+  // For now, this is a visual placeholder showing the concept
+}
+
+/**
+ * Wall that blocks everything
+ */
+class WallActor extends Actor {
+  mesh = new MeshComponent();
+  physics = new PhysicsComponent();
+
+  constructor() {
+    super();
+    this.addComponent(this.mesh);
+    this.setRootComponent(this.mesh);
+    this.addComponent(this.physics);
+  }
+
+  protected override onRegisterWithScene(scene: Scene): void {
+    const wall = MeshBuilder.CreateBox(`Wall_${this.id}`, { width: 5, height: 3, depth: 0.5 }, scene);
+    const material = new StandardMaterial(`WallMat_${this.id}`, scene);
+    material.diffuseColor = new Color3(0.6, 0.4, 0.2); // Brown
+    wall.material = material;
+    this.mesh.setMesh(wall);
+
+    this.physics.attachTo(this.mesh, {
+      shapeType: PhysicsShapeType.BOX,
+      mass: 0,
+      collisionProfile: CollisionPreset.Static,
+    });
+  }
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
 async function main(): Promise<void> {
   const engine = new Engine({
     canvas: "renderCanvas",
     tickRate: 60,
   });
 
-  engine.timeScale = 1.5
-  // Initialize physics and create world
   await engine.init();
 
   const scene = engine.scene;
@@ -142,87 +245,88 @@ async function main(): Promise<void> {
 
   // Light
   const light = new HemisphericLight("MainLight", new Vector3(0, 1, 0), scene);
-  light.intensity = 0.8;
+  light.intensity = 0.9;
 
-  // Spawn ground
+  // Spawn player pawn and possess with controller
+  const playerPawn = world.spawn(PlayerPawn);
+  const playerController = new CyclingPlayerController();
+  world.possess(playerController, playerPawn);
+
+  // Ground
   world.spawn(GroundActor);
 
-  // Spawn player
-  const player = world.spawn(
-    PlayerPawn,
-    Transform.fromLocation(new Vector3(0, 2, -5))
-     
-  );
-  const controller = new CyclingPlayerController();
-  world.possess(controller, player);
+  // Wall in the middle
+  world.spawn(WallActor, new Transform(
+    new Vector3(0, 1.5, 5),
+    Quaternion.Identity(),
+    Vector3.One()
+  ));
 
-  // Spawn physics cubes
-  const positions = [
-    new Vector3(-2, 5, 0),
-    new Vector3(0, 7, 0),
-    new Vector3(2, 9, 0),
-    new Vector3(0.5, 11, 0.5),
-    new Vector3(-0.5, 13, -0.5),
-  ];
+  // Trigger zone
+  world.spawn(TriggerZone, new Transform(
+    new Vector3(-5, 1.5, 0),
+    Quaternion.Identity(),
+    Vector3.One()
+  ));
 
-  for (const pos of positions) {
-    world.spawn(PhysicsCubeActor, Transform.fromLocation(pos));
+  // Spawn dynamic cubes (blue) - will collide with each other
+  console.log("--- Spawning Dynamic Cubes (blue) ---");
+  for (let i = 0; i < 3; i++) {
+    world.spawn(DynamicCube, Transform.fromLocation(new Vector3(-2 + i * 2, 5 + i * 2, 0)));
   }
 
-  // Spawn attached cubes demo
-  // Parent: red cube at height 3, rotated
-  const parentCube = world.spawn(
-    CubeActor,
-    new Transform(
-      new Vector3(5, 3, 0),
-      Quaternion.FromEulerAngles(0, Math.PI / 4, Math.PI / 6),
-      Vector3.One()
-    ),
-    (cube) => {
-      cube.color = new Color3(0.9, 0.2, 0.2);
+  // Spawn ghost cubes (magenta) - pass through dynamics, hit ground only
+  console.log("--- Spawning Ghost Cubes (magenta) - pass through blue cubes ---");
+  for (let i = 0; i < 3; i++) {
+    world.spawn(GhostCube, Transform.fromLocation(new Vector3(-2 + i * 2, 8 + i * 2, 0)));
+  }
+
+  // Spawn projectiles (yellow) - pass through each other
+  console.log("--- Spawning Projectiles (yellow) - pass through each other ---");
+  setTimeout(() => {
+    for (let i = 0; i < 5; i++) {
+      const proj = world.spawn(ProjectileSphere, Transform.fromLocation(
+        new Vector3(-4 + i * 2, 10, -3)
+      ));
+      // Give them velocity toward the wall
+      proj.physics.setLinearVelocity(new Vector3(0, 0, 5));
     }
-  );
-
-  // Child: blue cube attached to parent, offset by 2 units
-  const childCube = world.spawn(
-    CubeActor,
-    undefined,
-    (cube) => {
-      cube.color = new Color3(0.2, 0.2, 0.9);
-    }
-  );
-
-  // Attach child to parent
-  childCube.attachToActor(parentCube, {
-    locationRule: AttachmentRule.KeepWorld,
-    rotationRule: AttachmentRule.KeepRelative,
-    scaleRule: AttachmentRule.KeepRelative,
-  });
-
-  parentCube.attachToActor(player, {
-    locationRule: AttachmentRule.SnapToTarget,
-    rotationRule: AttachmentRule.KeepRelative,
-    scaleRule: AttachmentRule.KeepRelative,
-  });
-  parentCube.rootComponent!.relativeLocation = new Vector3(2, 1, 0);  
-
-  console.log("Attached cubes spawned - red (parent) and blue (child)");
+  }, 2000);
 
   engine.start();
-  console.log("Started with", world.actors.size, "actors");
-  console.log("Controls: WASD to move, Space to jump, P to cycle input mode");
 
-  // Show inspector
+  console.log("===========================================");
+  console.log("Collision Playground");
+  console.log("===========================================");
+  console.log("Blue cubes: Dynamic - collide with everything");
+  console.log("Magenta cubes: Ghost - pass through blues, hit ground only");
+  console.log("Yellow spheres: Projectiles - pass through each other");
+  console.log("Green box: Trigger zone - overlaps, never blocks");
+  console.log("Brown wall: Static - blocks all");
+  console.log("===========================================");
+
+  // Inspector
   scene.debugLayer.show({ embedMode: true });
 
-  // Delayed spawn test
-  setTimeout(() => {
-    world.spawn(
-      PhysicsCubeActor,
-      Transform.fromLocation(new Vector3(0, 15, 0))
-    );
-    console.log("Spawned delayed cube");
-  }, 5000);
+  // Keyboard controls for timeScale
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "1") engine.timeScale = 0.1;
+    if (e.key === "2") engine.timeScale = 0.5;
+    if (e.key === "3") engine.timeScale = 1;
+    if (e.key === "4") engine.timeScale = 2;
+    if (e.key === "0") engine.timeScale = 0;
+    if (e.key === " ") {
+      // Drop more cubes
+      world.spawn(DynamicCube, Transform.fromLocation(new Vector3(
+        (Math.random() - 0.5) * 10,
+        15,
+        (Math.random() - 0.5) * 10
+      )));
+    }
+  });
+
+  console.log("Press 0-4 for timeScale (0=pause, 1=0.1x, 2=0.5x, 3=1x, 4=2x)");
+  console.log("Press SPACE to drop more blue cubes");
 }
 
 main();
