@@ -5,31 +5,24 @@ import {
   PhysicsComponent,
   PhysicsShapeType,
   Transform,
-  CollisionLayer,
   CollisionPreset,
-  createCollisionProfile,
-  CollisionResponse,
 } from "edenmark";
 import {
   Vector3,
-  Quaternion,
   HemisphericLight,
   MeshBuilder,
   StandardMaterial,
   Color3,
   type Scene,
+  FreeCamera,
 } from "@babylonjs/core";
-import "@babylonjs/inspector";
-import { PlayerPawn, CyclingPlayerController } from "./Player";
-
-// ============================================================================
-// Collision Playground - Testing collision layers, masks, and responses
-// ============================================================================
+import { WebXRDefaultExperience } from "@babylonjs/core/XR";
+import "@babylonjs/loaders/glTF"; // Required for controller/hand mesh loading
 
 /**
- * Ground plane - Static collision, blocks everything
+ * Simple ground plane.
  */
-class GroundActor extends Actor {
+class Ground extends Actor {
   mesh = new MeshComponent();
   physics = new PhysicsComponent();
 
@@ -41,292 +34,137 @@ class GroundActor extends Actor {
   }
 
   protected override onRegisterWithScene(scene: Scene): void {
-    const ground = MeshBuilder.CreateGround("Ground", { width: 30, height: 30 }, scene);
-    const material = new StandardMaterial("GroundMat", scene);
-    material.diffuseColor = new Color3(0.3, 0.3, 0.3);
-    ground.material = material;
+    const ground = MeshBuilder.CreateGround("Ground", { width: 50, height: 50 }, scene);
+    const mat = new StandardMaterial("GroundMat", scene);
+    mat.diffuseColor = new Color3(0.3, 0.5, 0.3);
+    ground.material = mat;
     this.mesh.setMesh(ground);
 
-    // Static ground - blocks all
     this.physics.attachTo(this.mesh, {
       shapeType: PhysicsShapeType.BOX,
       mass: 0,
-      restitution: 0.3,
       collisionProfile: CollisionPreset.Static,
     });
   }
 }
 
 /**
- * Dynamic cube - normal physics, blocks other dynamics
+ * A falling box.
  */
-class DynamicCube extends Actor {
+class FallingBox extends Actor {
   mesh = new MeshComponent();
   physics = new PhysicsComponent();
-  color: Color3;
 
   constructor() {
     super();
-    this.color = new Color3(0.2, 0.6, 0.9); // Blue
     this.addComponent(this.mesh);
     this.setRootComponent(this.mesh);
     this.addComponent(this.physics);
   }
 
   protected override onRegisterWithScene(scene: Scene): void {
-    const box = MeshBuilder.CreateBox(`DynamicCube_${this.id}`, { size: 1 }, scene);
-    const material = new StandardMaterial(`DynamicMat_${this.id}`, scene);
-    material.diffuseColor = this.color;
-    box.material = material;
+    const box = MeshBuilder.CreateBox(`Box_${this.id}`, { size: 1 }, scene);
+    const mat = new StandardMaterial(`BoxMat_${this.id}`, scene);
+    mat.diffuseColor = new Color3(0.8, 0.2, 0.2);
+    box.material = mat;
     this.mesh.setMesh(box);
 
     this.physics.attachTo(this.mesh, {
       shapeType: PhysicsShapeType.BOX,
       mass: 1,
       restitution: 0.5,
-      friction: 0.5,
-      collisionProfile: CollisionPreset.Dynamic,
-    });
-    this.physics.setDynamic();
-  }
-}
-
-/**
- * "Ghost" cube - ignores other dynamics, only collides with ground
- * Good for: non-blocking visual effects, pass-through objects
- */
-class GhostCube extends Actor {
-  mesh = new MeshComponent();
-  physics = new PhysicsComponent();
-
-  constructor() {
-    super();
-    this.addComponent(this.mesh);
-    this.setRootComponent(this.mesh);
-    this.addComponent(this.physics);
-  }
-
-  protected override onRegisterWithScene(scene: Scene): void {
-    const box = MeshBuilder.CreateBox(`GhostCube_${this.id}`, { size: 1 }, scene);
-    const material = new StandardMaterial(`GhostMat_${this.id}`, scene);
-    material.diffuseColor = new Color3(0.9, 0.2, 0.9); // Magenta
-    material.alpha = 0.6; // Semi-transparent
-    box.material = material;
-    this.mesh.setMesh(box);
-
-    // Custom profile: only collides with Static/Ground, ignores Dynamic
-    const ghostProfile = createCollisionProfile({
-      layer: CollisionLayer.Dynamic,
-      mask: CollisionLayer.Static | CollisionLayer.Ground, // Only hit ground
-      defaultResponse: CollisionResponse.Block,
-    });
-
-    this.physics.attachTo(this.mesh, {
-      shapeType: PhysicsShapeType.BOX,
-      mass: 1,
-      restitution: 0.8,
-      collisionProfile: ghostProfile,
-    });
-    this.physics.setDynamic();
-  }
-}
-
-/**
- * Projectile - only hits Static and Actors, ignores other projectiles
- */
-class ProjectileSphere extends Actor {
-  mesh = new MeshComponent();
-  physics = new PhysicsComponent();
-
-  constructor() {
-    super();
-    this.addComponent(this.mesh);
-    this.setRootComponent(this.mesh);
-    this.addComponent(this.physics);
-  }
-
-  protected override onRegisterWithScene(scene: Scene): void {
-    const sphere = MeshBuilder.CreateSphere(`Projectile_${this.id}`, { diameter: 0.5 }, scene);
-    const material = new StandardMaterial(`ProjectileMat_${this.id}`, scene);
-    material.diffuseColor = new Color3(0.9, 0.9, 0.2); // Yellow
-    material.emissiveColor = new Color3(0.3, 0.3, 0);
-    sphere.material = material;
-    this.mesh.setMesh(sphere);
-
-    this.physics.attachTo(this.mesh, {
-      shapeType: PhysicsShapeType.SPHERE,
-      mass: 0.5,
-      restitution: 0.9,
-      collisionProfile: CollisionPreset.Projectile,
-    });
-    this.physics.setDynamic();
-  }
-}
-
-/**
- * Trigger zone - overlaps, never blocks
- * Good for: damage zones, pickup areas, checkpoints
- */
-class TriggerZone extends Actor {
-  mesh = new MeshComponent();
-  physics = new PhysicsComponent();
-
-  constructor() {
-    super();
-    this.addComponent(this.mesh);
-    this.setRootComponent(this.mesh);
-    this.addComponent(this.physics);
-    this.tickEnabled = true;
-  }
-
-  protected override onRegisterWithScene(scene: Scene): void {
-    const box = MeshBuilder.CreateBox(`Trigger_${this.id}`, { size: 3 }, scene);
-    const material = new StandardMaterial(`TriggerMat_${this.id}`, scene);
-    material.diffuseColor = new Color3(0.2, 0.9, 0.2); // Green
-    material.alpha = 0.3;
-    box.material = material;
-    this.mesh.setMesh(box);
-
-    this.physics.attachTo(this.mesh, {
-      shapeType: PhysicsShapeType.BOX,
-      mass: 0, // Static trigger
-      collisionProfile: CollisionPreset.Trigger,
-    });
-    this.physics.setStatic();
-  }
-
-  // Note: In a full implementation, you'd have overlap events from physics
-  // For now, this is a visual placeholder showing the concept
-}
-
-/**
- * Wall that blocks everything
- */
-class WallActor extends Actor {
-  mesh = new MeshComponent();
-  physics = new PhysicsComponent();
-
-  constructor() {
-    super();
-    this.addComponent(this.mesh);
-    this.setRootComponent(this.mesh);
-    this.addComponent(this.physics);
-  }
-
-  protected override onRegisterWithScene(scene: Scene): void {
-    const wall = MeshBuilder.CreateBox(`Wall_${this.id}`, { width: 5, height: 3, depth: 0.5 }, scene);
-    const material = new StandardMaterial(`WallMat_${this.id}`, scene);
-    material.diffuseColor = new Color3(0.6, 0.4, 0.2); // Brown
-    wall.material = material;
-    this.mesh.setMesh(wall);
-
-    this.physics.attachTo(this.mesh, {
-      shapeType: PhysicsShapeType.BOX,
-      mass: 0,
-      collisionProfile: CollisionPreset.Static,
+      collisionProfile: CollisionPreset.Actor,
     });
   }
 }
-
-// ============================================================================
-// Main
-// ============================================================================
 
 async function main(): Promise<void> {
-  const engine = new Engine({
-    canvas: "renderCanvas",
-    tickRate: 60,
-  });
-
+  const engine = new Engine({ canvas: "renderCanvas", tickRate: 60 });
   await engine.init();
 
   const scene = engine.scene;
   const world = engine.world;
 
-  // Light
-  const light = new HemisphericLight("MainLight", new Vector3(0, 1, 0), scene);
-  light.intensity = 0.9;
+  // Lighting
+  new HemisphericLight("Light", new Vector3(0, 1, 0), scene);
 
-  // Spawn player pawn and possess with controller
-  const playerPawn = world.spawn(PlayerPawn);
-  const playerController = new CyclingPlayerController();
-  world.possess(playerController, playerPawn);
+  // Camera (for non-VR viewing)
+  const camera = new FreeCamera("Camera", new Vector3(0, 5, -15), scene);
+  camera.setTarget(Vector3.Zero());
+  camera.attachControl(engine.canvas, true);
 
   // Ground
-  world.spawn(GroundActor);
+  world.spawn(Ground, Transform.fromLocation(Vector3.Zero()));
 
-  // Wall in the middle
-  world.spawn(WallActor, new Transform(
-    new Vector3(0, 1.5, 5),
-    Quaternion.Identity(),
-    Vector3.One()
-  ));
-
-  // Trigger zone
-  world.spawn(TriggerZone, new Transform(
-    new Vector3(-5, 1.5, 0),
-    Quaternion.Identity(),
-    Vector3.One()
-  ));
-
-  // Spawn dynamic cubes (blue) - will collide with each other
-  console.log("--- Spawning Dynamic Cubes (blue) ---");
-  for (let i = 0; i < 3; i++) {
-    world.spawn(DynamicCube, Transform.fromLocation(new Vector3(-2 + i * 2, 5 + i * 2, 0)));
+  // Spawn some falling boxes
+  for (let i = 0; i < 5; i++) {
+    world.spawn(
+      FallingBox,
+      Transform.fromLocation(new Vector3(i * 2 - 4, 5 + i * 2, 0))
+    );
   }
 
-  // Spawn ghost cubes (magenta) - pass through dynamics, hit ground only
-  console.log("--- Spawning Ghost Cubes (magenta) - pass through blue cubes ---");
-  for (let i = 0; i < 3; i++) {
-    world.spawn(GhostCube, Transform.fromLocation(new Vector3(-2 + i * 2, 8 + i * 2, 0)));
-  }
-
-  // Spawn projectiles (yellow) - pass through each other
-  console.log("--- Spawning Projectiles (yellow) - pass through each other ---");
-  setTimeout(() => {
-    for (let i = 0; i < 5; i++) {
-      const proj = world.spawn(ProjectileSphere, Transform.fromLocation(
-        new Vector3(-4 + i * 2, 10, -3)
-      ));
-      // Give them velocity toward the wall
-      proj.physics.setLinearVelocity(new Vector3(0, 0, 5));
-    }
-  }, 2000);
-
-  engine.start();
-
-  console.log("===========================================");
-  console.log("Collision Playground");
-  console.log("===========================================");
-  console.log("Blue cubes: Dynamic - collide with everything");
-  console.log("Magenta cubes: Ghost - pass through blues, hit ground only");
-  console.log("Yellow spheres: Projectiles - pass through each other");
-  console.log("Green box: Trigger zone - overlaps, never blocks");
-  console.log("Brown wall: Static - blocks all");
-  console.log("===========================================");
-
-  // Inspector
-  scene.debugLayer.show({ embedMode: true });
-
-  // Keyboard controls for timeScale
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "1") engine.timeScale = 0.1;
-    if (e.key === "2") engine.timeScale = 0.5;
-    if (e.key === "3") engine.timeScale = 1;
-    if (e.key === "4") engine.timeScale = 2;
-    if (e.key === "0") engine.timeScale = 0;
-    if (e.key === " ") {
-      // Drop more cubes
-      world.spawn(DynamicCube, Transform.fromLocation(new Vector3(
-        (Math.random() - 0.5) * 10,
-        15,
-        (Math.random() - 0.5) * 10
-      )));
-    }
+  // WebXR with controller velocity tracking
+  const xr = await WebXRDefaultExperience.CreateAsync(scene, {
+    floorMeshes: [], // Ground mesh could go here
   });
 
-  console.log("Press 0-4 for timeScale (0=pause, 1=0.1x, 2=0.5x, 3=1x, 4=2x)");
-  console.log("Press SPACE to drop more blue cubes");
+  // Track previous positions for manual velocity calculation
+  const prevPositions = new Map<string, { pos: Vector3; time: number }>();
+
+  xr.input.onControllerAddedObservable.add((controller) => {
+    const hand = controller.inputSource.handedness;
+    console.log("Controller added:", hand);
+
+    scene.onBeforeRenderObservable.add(() => {
+      const frame = xr.baseExperience.sessionManager.currentFrame;
+      if (!frame) return;
+
+      const refSpace = xr.baseExperience.sessionManager.referenceSpace;
+      if (!refSpace || !controller.inputSource.gripSpace) return;
+
+      const pose = frame.getPose(controller.inputSource.gripSpace, refSpace);
+      if (!pose) return;
+
+      const pos = pose.transform.position;
+      const currentPos = new Vector3(pos.x, pos.y, pos.z);
+      const now = performance.now();
+
+      if (pose.linearVelocity) {
+        // Native WebXR velocity available
+        console.log(
+          `${hand} native velocity:`,
+          pose.linearVelocity.x.toFixed(2),
+          pose.linearVelocity.y.toFixed(2),
+          pose.linearVelocity.z.toFixed(2)
+        );
+      } else {
+        // Manual velocity from position delta
+        const prev = prevPositions.get(hand);
+        if (prev) {
+          const dt = (now - prev.time) / 1000; // seconds
+          if (dt > 0.001) {
+            const velocity = currentPos.subtract(prev.pos).scale(1 / dt);
+            const speed = velocity.length();
+            if (speed > 0.1) {
+              console.log(
+                `${hand} computed velocity:`,
+                velocity.x.toFixed(2),
+                velocity.y.toFixed(2),
+                velocity.z.toFixed(2),
+                `(${speed.toFixed(2)} m/s)`
+              );
+            }
+          }
+        }
+      }
+
+      prevPositions.set(hand, { pos: currentPos, time: now });
+    });
+  });
+
+  // Start
+  engine.start();
 }
 
-main();
+main().catch(console.error);
